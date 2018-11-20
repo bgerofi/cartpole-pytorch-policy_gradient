@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.autograd import Variable
 from torch.distributions import Categorical
 
 
@@ -31,7 +30,7 @@ class Policy(nn.Module):
         self.gamma = gamma
         
         # Episode policy and reward history 
-        self.policy_history = Variable(torch.Tensor()) 
+        self.policy_history = []
         self.reward_episode = []
         # Overall reward and loss history
         self.reward_history = []
@@ -56,19 +55,12 @@ optimizer = optim.Adam(policy.parameters(), lr=learning_rate)
 def select_action(state):
     # Select an action (0 or 1) by running policy model and choosing
     # based on the probabilities in state
-    state = torch.from_numpy(state).type(torch.FloatTensor)
-    state = policy(Variable(state))
-    c = Categorical(state)
+    probs = policy(torch.tensor(state, dtype=torch.float32))
+    c = Categorical(probs)
     action = c.sample()
 
-    #print("policy_history: {}, log_prob(action): {}".format(
-    #    policy.policy_history, c.log_prob(action).unsqueeze(-1)))
-    
-    # Add log probability of our chosen action to our history
-    if policy.policy_history.dim() != 0:
-        policy.policy_history = torch.cat((policy.policy_history, c.log_prob(action).unsqueeze(-1)))
-    else:
-        policy.policy_history = (c.log_prob(action))
+    policy.policy_history.append(c.log_prob(action))
+
     return action
 
 
@@ -82,11 +74,13 @@ def update_policy():
         rewards.insert(0,R)
 
     # Scale rewards
-    rewards = torch.FloatTensor(rewards)
+    rewards = torch.tensor(rewards)
     rewards = (rewards - rewards.mean()) / (rewards.std())
     
     # Calculate loss
-    loss = torch.sum(torch.mul(policy.policy_history, Variable(rewards)).mul(-1), -1)
+    loss = torch.sum(torch.mul(
+        torch.stack(policy.policy_history),
+        rewards).mul(-1), -1)
     
     # Update network weights
     optimizer.zero_grad()
@@ -96,7 +90,7 @@ def update_policy():
     # Save and intialize episode history counters
     policy.loss_history.append(loss.item())
     policy.reward_history.append(np.sum(policy.reward_episode))
-    policy.policy_history = Variable(torch.Tensor())
+    policy.policy_history = []
     policy.reward_episode= []
 
 
