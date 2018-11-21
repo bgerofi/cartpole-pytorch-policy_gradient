@@ -64,6 +64,16 @@ class Policy(nn.Module):
         return action
 
 
+    def moving_exp_avg(self, elemlist, alpha, nr_elems):
+        if len(elemlist) < nr_elems:
+            nr_elems = len(elemlist)
+
+        pows = alpha ** np.arange(nr_elems)
+
+        mult = np.array(elemlist[-nr_elems:]) * pows
+        return mult.sum() / pows.sum()
+
+
     def update(self):
         R = 0
         rewards = []
@@ -77,8 +87,6 @@ class Policy(nn.Module):
         rewards = torch.tensor(rewards)
         rewards = (rewards - rewards.mean()) / (rewards.std())
 
-        # Why not??
-        # loss = torch.sum(torch.stack(self.policy_history)) * R * -1.0
         # Calculate loss
         loss = torch.sum(torch.mul(torch.stack(self.policy_history), rewards)).mul(-1)
 
@@ -90,6 +98,32 @@ class Policy(nn.Module):
         # Save and intialize episode history counters
         self.loss_history.append(loss.item())
         self.reward_history.append(np.sum(self.reward_episode))
+        self.policy_history = []
+        self.reward_episode = []
+
+
+    def update_with_baseline(self):
+        # Baseline
+        B = 0
+        if len(self.reward_history) > 10:
+            B = self.moving_exp_avg(self.reward_history, 1.001, 10)
+
+        # Discount future rewards back to the present using gamma
+        R = 0
+        for r in self.reward_episode[::-1]:
+            R = r + self.gamma * R
+
+        # Loss with exponential moving average baseline
+        loss = torch.sum(torch.stack(self.policy_history)) * (R - B) * -1.0
+
+        # Update network weights
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        # Save and intialize episode history counters
+        self.loss_history.append(loss.item())
+        self.reward_history.append(R)
         self.policy_history = []
         self.reward_episode = []
 
@@ -121,13 +155,13 @@ def main(episodes):
         # Used to determine when the environment is solved.
         running_reward = (running_reward * 0.99) + (time * 0.01)
 
-        policy.update()
+        policy.update_with_baseline()
 
         if episode % 10 == 0:
             print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(episode, time, running_reward))
 
         if running_reward > env.spec.reward_threshold:
-            print("Solved! Running reward is now {} and the last episode runs to {} time steps!".format(running_reward, time))
+            print("Solved at episode {}! Running reward is now {} and the last episode runs to {} time steps!".format(episode, running_reward, time))
             break
 
 
