@@ -77,9 +77,10 @@ class Policy(nn.Module):
         rewards = torch.tensor(rewards)
         rewards = (rewards - rewards.mean()) / (rewards.std())
 
+        # Why not??
+        # loss = torch.sum(torch.stack(self.policy_history)) * R * -1.0
         # Calculate loss
-        loss = torch.sum(torch.mul(torch.stack(self.policy_history),
-            rewards).mul(-1), -1)
+        loss = torch.sum(torch.mul(torch.stack(self.policy_history), rewards)).mul(-1)
 
         # Update network weights
         self.optimizer.zero_grad()
@@ -90,7 +91,7 @@ class Policy(nn.Module):
         self.loss_history.append(loss.item())
         self.reward_history.append(np.sum(self.reward_episode))
         self.policy_history = []
-        self.reward_episode= []
+        self.reward_episode = []
 
 
 
